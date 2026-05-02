@@ -1,15 +1,26 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import io
+import base64
+from fpdf import FPDF
 
 st.set_page_config(page_title="Reciclaje Velásquez", page_icon="♻️", layout="wide")
 
 st.title("♻️ RECICLAJE VELÁSQUEZ")
 st.markdown("### Sistema de Gestión de Inventario con Clasificación ABC DUAL")
 st.info("📦 **Modo de acumulación activado:** Los residuos del mismo tipo se suman automáticamente")
+
+# ============================================
+# INICIALIZACIÓN DE VARIABLES DE SESIÓN
+# ============================================
+if 'umbral_stock' not in st.session_state:
+    st.session_state.umbral_stock = 50.0  # umbral por defecto (kg)
+if 'filtro_busqueda' not in st.session_state:
+    st.session_state.filtro_busqueda = ""
 
 # ============================================
 # BARRA LATERAL CON INFORMACIÓN DEL MÉTODO ABC
@@ -55,7 +66,7 @@ with st.sidebar:
     st.caption("♻️ Reciclaje Velásquez")
 
 # ============================================
-# CONEXIÓN A GOOGLE SHEETS
+# CONEXIÓN A GOOGLE SHEETS (igual)
 # ============================================
 def conectar_google_sheets():
     try:
@@ -251,7 +262,7 @@ def vender_residuo_por_tipo(tipo, cantidad_vendida):
     return mensaje
 
 # ============================================
-# CLASIFICACIONES Y ANÁLISIS
+# CLASIFICACIONES Y ANÁLISIS (sin cambios)
 # ============================================
 def clasificar_abc_valor():
     df = cargar_inventario()
@@ -304,7 +315,6 @@ def calcular_velocidad_rotacion():
     return velocidad_ordenado
 
 def analisis_tiempo_salida():
-    """Análisis de cuánto tarda cada residuo en venderse (días desde ingreso hasta venta)"""
     df_hist = cargar_historial()
     if df_hist.empty:
         return pd.DataFrame()
@@ -361,13 +371,166 @@ def grafico_pareto_velocidad():
     st.pyplot(fig)
 
 # ============================================
-# INTERFAZ DE USUARIO (con resúmenes y análisis)
+# NUEVAS FUNCIONES: EXPORTACIÓN, TENDENCIAS, ALERTAS
+# ============================================
+
+def exportar_excel():
+    """Genera un archivo Excel con inventario, historial, clasificaciones y resúmenes"""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Inventario
+        df_inv = cargar_inventario()
+        df_inv.to_excel(writer, sheet_name='Inventario', index=False)
+        # Historial
+        df_hist = cargar_historial()
+        df_hist.to_excel(writer, sheet_name='Historial', index=False)
+        # Clasificación valor
+        df_val = clasificar_abc_valor()
+        if not df_val.empty:
+            df_val.to_excel(writer, sheet_name='Clasificacion_Valor', index=False)
+        # Clasificación velocidad
+        df_vel = calcular_velocidad_rotacion()
+        if not df_vel.empty:
+            df_vel.to_excel(writer, sheet_name='Clasificacion_Velocidad', index=False)
+        # Tiempo salida
+        df_tiempo = analisis_tiempo_salida()
+        if not df_tiempo.empty:
+            df_tiempo.to_excel(writer, sheet_name='Tiempo_Salida', index=False)
+    output.seek(0)
+    return output
+
+def exportar_pdf():
+    """Genera un PDF sencillo con un resumen ejecutivo"""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt="Reporte Reciclaje Velásquez", ln=1, align='C')
+    pdf.cell(200, 10, txt=f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=1, align='C')
+    
+    # KPIs
+    df_inv = cargar_inventario()
+    total_valor = (df_inv['cantidad'] * df_inv['precio_venta']).sum() if not df_inv.empty else 0
+    pdf.cell(200, 10, txt=f"Valor total inventario: ${total_valor:,.2f}", ln=1)
+    pdf.cell(200, 10, txt=f"Items en stock: {len(df_inv)}", ln=1)
+    pdf.cell(200, 10, txt=f"-----------------------------------", ln=1)
+    
+    # Inventario resumido (primeros 10)
+    pdf.set_font("Arial", size=10)
+    pdf.cell(200, 10, txt="Top 10 residuos por cantidad:", ln=1)
+    if not df_inv.empty:
+        top = df_inv.nlargest(10, 'cantidad')[['tipo_residuo', 'cantidad']]
+        for i, row in top.iterrows():
+            pdf.cell(200, 8, txt=f"{row['tipo_residuo']}: {row['cantidad']} kg", ln=1)
+    else:
+        pdf.cell(200, 8, txt="No hay datos", ln=1)
+    
+    pdf_output = pdf.output(dest='S').encode('latin-1')
+    return io.BytesIO(pdf_output)
+
+def grafico_tendencias_mensuales():
+    """Gráfico de ventas y compras mensuales"""
+    df_hist = cargar_historial()
+    if df_hist.empty:
+        st.info("No hay suficientes datos para tendencias.")
+        return
+    df_hist['fecha'] = pd.to_datetime(df_hist['fecha'])
+    df_hist['mes'] = df_hist['fecha'].dt.to_period('M').astype(str)
+    
+    compras = df_hist[df_hist['tipo_movimiento'] == 'COMPRA'].groupby('mes')['valor_total'].sum()
+    ventas = df_hist[df_hist['tipo_movimiento'] == 'VENTA'].groupby('mes')['valor_total'].sum()
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    if not compras.empty:
+        ax.plot(compras.index, compras.values, marker='o', label='Compras')
+    if not ventas.empty:
+        ax.plot(ventas.index, ventas.values, marker='s', label='Ventas')
+    ax.set_xlabel('Mes')
+    ax.set_ylabel('Valor total ($)')
+    ax.set_title('Tendencia mensual de compras y ventas')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    st.pyplot(fig)
+
+def low_stock_alerts():
+    """Muestra alertas de stock por debajo del umbral definido"""
+    df_inv = cargar_inventario()
+    if df_inv.empty:
+        return
+    umbral = st.session_state.umbral_stock
+    low_stock = df_inv[df_inv['cantidad'] < umbral]
+    if not low_stock.empty:
+        st.warning(f"⚠️ **Alerta de stock mínimo** (umbral: {umbral} kg)")
+        for _, row in low_stock.iterrows():
+            st.write(f"- {row['tipo_residuo']}: {row['cantidad']} kg (por debajo de {umbral} kg)")
+    else:
+        st.success("✅ Todos los residuos están por encima del umbral de stock.")
+
+# ============================================
+# DASHBOARD EJECUTIVO (NUEVA PESTAÑA)
+# ============================================
+def dashboard_ejecutivo():
+    st.subheader("📊 Dashboard Ejecutivo")
+    
+    # KPIs
+    df_inv = cargar_inventario()
+    total_valor = (df_inv['cantidad'] * df_inv['precio_venta']).sum() if not df_inv.empty else 0
+    total_items = len(df_inv)
+    
+    df_hist = cargar_historial()
+    ventas = df_hist[df_hist['tipo_movimiento'] == 'VENTA'] if not df_hist.empty else pd.DataFrame()
+    total_ventas = ventas['valor_total'].sum() if not ventas.empty else 0
+    
+    # Velocidad promedio
+    df_vel = calcular_velocidad_rotacion()
+    velocidad_prom = df_vel['velocidad_rotacion'].mean() if not df_vel.empty else 0
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Valor inventario", f"${total_valor:,.2f}")
+    col2.metric("Items en stock", total_items)
+    col3.metric("Ventas totales (histórico)", f"${total_ventas:,.2f}")
+    col4.metric("Velocidad promedio", f"{velocidad_prom:.2f} kg/día")
+    
+    # Umbral de stock
+    nuevo_umbral = st.number_input("Definir umbral de stock mínimo (kg)", min_value=0.0, value=st.session_state.umbral_stock, step=5.0)
+    if nuevo_umbral != st.session_state.umbral_stock:
+        st.session_state.umbral_stock = nuevo_umbral
+        st.rerun()
+    
+    # Alertas
+    low_stock_alerts()
+    
+    # Gráfico de tendencias
+    st.subheader("📈 Tendencia mensual de compras/ventas")
+    grafico_tendencias_mensuales()
+    
+    # Exportar
+    st.subheader("📑 Exportar reportes")
+    col_ex1, col_ex2 = st.columns(2)
+    with col_ex1:
+        if st.button("📊 Exportar a Excel"):
+            excel_data = exportar_excel()
+            b64 = base64.b64encode(excel_data.read()).decode()
+            href = f'<a href="data:application/octet-stream;base64,{b64}" download="reporte_reciclaje.xlsx">Descargar Excel</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            st.toast("✅ Reporte Excel generado", icon="📊")
+    with col_ex2:
+        if st.button("📄 Exportar a PDF"):
+            pdf_data = exportar_pdf()
+            b64 = base64.b64encode(pdf_data.read()).decode()
+            href = f'<a href="data:application/octet-stream;base64,{b64}" download="reporte_reciclaje.pdf">Descargar PDF</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            st.toast("✅ Reporte PDF generado", icon="📄")
+
+# ============================================
+# INTERFAZ DE USUARIO (con nueva pestaña Dashboard)
 # ============================================
 if 'bienvenido' not in st.session_state:
     st.toast("♻️ ¡Bienvenido al Sistema de Reciclaje Velásquez! Sistema listo para operar.", icon="🎉")
     st.session_state.bienvenido = True
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+# Añadimos la pestaña Dashboard al principio
+tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Dashboard",
     "📦 Gestión", 
     "💰 Clasificación Valor", 
     "⚡ Clasificación Velocidad",
@@ -376,7 +539,11 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📜 Historial"
 ])
 
-# ---------- Pestaña 1: Gestión ----------
+# ---------- Pestaña 0: Dashboard Ejecutivo ----------
+with tab0:
+    dashboard_ejecutivo()
+
+# ---------- Pestaña 1: Gestión (con filtro de búsqueda añadido) ----------
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
@@ -410,20 +577,35 @@ with tab1:
                     st.warning("⚠️ Complete todos los campos obligatorios (tipo y cantidad)")
     
     st.subheader("📋 Inventario Actual")
+    # Filtro de búsqueda
+    search_term = st.text_input("🔍 Buscar residuo (nombre o proveedor)", value=st.session_state.filtro_busqueda, key="search_input")
+    st.session_state.filtro_busqueda = search_term
+    
     inventario = cargar_inventario()
     if not inventario.empty:
+        # Aplicar filtro
+        if search_term:
+            mask = inventario['tipo_residuo'].str.contains(search_term, case=False, na=False) | inventario['proveedor'].str.contains(search_term, case=False, na=False)
+            inventario = inventario[mask]
+        
         inv_show = inventario.copy()
         inv_show["precio_compra"] = inv_show["precio_compra"].apply(lambda x: f"${x:.2f}")
         inv_show["precio_venta"] = inv_show["precio_venta"].apply(lambda x: f"${x:.2f}")
         st.dataframe(inv_show, use_container_width=True)
-        st.caption(f"📌 Total de tipos de residuos: {len(inventario)}")
+        st.caption(f"📌 Total de tipos de residuos mostrados: {len(inventario)}")
     else:
         st.info("📭 No hay residuos registrados. Agrega tu primer residuo usando el formulario.")
 
-# ---------- Pestaña 2: Clasificación por Valor (con resumen) ----------
+# ---------- Resto de pestañas (tab2 a tab6) exactamente igual que antes ----------
+# (Copia el código de las pestañas originales desde tab2 hasta tab6)
+
+# Nota: Por brevedad, aquí solo incluyo el contenido de tab2 a tab6 tal cual estaban.
+# Asegúrate de mantener la indentación correcta.
+
+# ---------- Pestaña 2: Clasificación por Valor ----------
 with tab2:
     st.subheader("💰 Clasificación ABC por VALOR de Rotación")
-    if st.button("🔄 Actualizar clasificación por VALOR"):
+    if st.button("🔄 Actualizar clasificación por VALOR", key="btn_valor_update"):
         df_valor = clasificar_abc_valor()
         if not df_valor.empty:
             df_show = df_valor.copy()
@@ -431,7 +613,6 @@ with tab2:
             df_show["valor_rotacion"] = df_show["valor_rotacion"].apply(lambda x: f"${x:.2f}")
             st.dataframe(df_show[["tipo_residuo", "cantidad", "precio_venta", "valor_rotacion", "clasificacion_valor"]], use_container_width=True)
             
-            # Resumen detallado y análisis
             st.markdown("### 📊 Resumen del análisis")
             resumen_valor = df_valor.groupby("clasificacion_valor").agg(
                 cantidad_items=("id", "count"),
@@ -441,7 +622,6 @@ with tab2:
             resumen_valor["valor_total"] = resumen_valor["valor_total"].apply(lambda x: f"${x:,.2f}")
             st.dataframe(resumen_valor, use_container_width=True)
             
-            # Interpretación automática
             st.markdown("#### 🔍 Interpretación")
             alta = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("A")]["cantidad_items"].values
             media = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("B")]["cantidad_items"].values
@@ -453,17 +633,16 @@ with tab2:
         else:
             st.warning("⚠️ No hay datos suficientes para clasificar por valor.")
 
-# ---------- Pestaña 3: Clasificación por Velocidad (con resumen) ----------
+# ---------- Pestaña 3: Clasificación por Velocidad ----------
 with tab3:
     st.subheader("⚡ Clasificación ABC por VELOCIDAD de Rotación")
-    if st.button("🔄 Actualizar clasificación por VELOCIDAD"):
+    if st.button("🔄 Actualizar clasificación por VELOCIDAD", key="btn_vel_update"):
         df_vel = calcular_velocidad_rotacion()
         if not df_vel.empty:
             df_show = df_vel.copy()
             df_show["velocidad_rotacion"] = df_show["velocidad_rotacion"].apply(lambda x: f"{x:.2f} kg/día")
             st.dataframe(df_show[["tipo_residuo", "cantidad_total_vendida", "dias_promedio_rotacion", "velocidad_rotacion", "clasificacion_velocidad"]], use_container_width=True)
             
-            # Resumen detallado
             st.markdown("### 📊 Resumen del análisis de velocidad")
             resumen_vel = df_vel.groupby("clasificacion_velocidad").agg(
                 cantidad_items=("id", "count"),
@@ -474,7 +653,6 @@ with tab3:
             resumen_vel["dias_promedio"] = resumen_vel["dias_promedio"].apply(lambda x: f"{x:.1f} días")
             st.dataframe(resumen_vel, use_container_width=True)
             
-            # Interpretación
             st.markdown("#### 🔍 Interpretación")
             st.write("- **Categoría A (Rápida rotación):** Productos que se venden rápido. Mantener stock suficiente y reorden frecuente.")
             st.write("- **Categoría B (Rotación media):** Balance entre rotación y stock.")
@@ -487,7 +665,7 @@ with tab3:
 with tab4:
     st.subheader("⏱️ Análisis de Tiempo de Salida del Almacén")
     st.markdown("**Mide cuántos días tarda cada residuo en venderse desde que ingresa.**")
-    if st.button("🔄 Analizar tiempos de salida"):
+    if st.button("🔄 Analizar tiempos de salida", key="btn_tiempo_update"):
         df_tiempo = analisis_tiempo_salida()
         if not df_tiempo.empty:
             df_show = df_tiempo.copy()
@@ -511,7 +689,7 @@ with tab4:
         else:
             st.warning("⚠️ No hay suficientes ventas registradas para analizar tiempos de salida.")
 
-# ---------- Pestaña 5: Gráficos (AHORA CON DOS GRÁFICOS) ----------
+# ---------- Pestaña 5: Gráficos (ya tiene dos gráficos) ----------
 with tab5:
     st.subheader("📊 Gráficos de Pareto")
     
@@ -519,7 +697,7 @@ with tab5:
     
     with col_graf1:
         st.markdown("### 📈 Por VALOR")
-        if st.button("Generar gráfico de Pareto (Valor)", key="btn_pareto_valor"):
+        if st.button("Generar gráfico de Pareto (Valor)", key="btn_pareto_valor_new"):
             df_valor = clasificar_abc_valor()
             if not df_valor.empty:
                 grafico_pareto_valor()
@@ -529,7 +707,7 @@ with tab5:
     
     with col_graf2:
         st.markdown("### ⚡ Por VELOCIDAD")
-        if st.button("Generar gráfico de Pareto (Velocidad)", key="btn_pareto_vel"):
+        if st.button("Generar gráfico de Pareto (Velocidad)", key="btn_pareto_vel_new"):
             df_vel = calcular_velocidad_rotacion()
             if not df_vel.empty:
                 grafico_pareto_velocidad()
