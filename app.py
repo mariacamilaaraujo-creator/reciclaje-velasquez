@@ -55,7 +55,7 @@ with st.sidebar:
     st.caption("♻️ Reciclaje Velásquez")
 
 # ============================================
-# CONEXIÓN A GOOGLE SHEETS (sin cambios)
+# CONEXIÓN A GOOGLE SHEETS
 # ============================================
 def conectar_google_sheets():
     try:
@@ -332,6 +332,35 @@ def analisis_tiempo_salida():
     return tiempo
 
 # ============================================
+# FUNCIONES PARA GRÁFICOS DE PARETO (AMBOS)
+# ============================================
+def grafico_pareto_valor():
+    df_valor = clasificar_abc_valor()
+    if df_valor.empty:
+        return None
+    fig, ax = plt.subplots(figsize=(10, 5))
+    colors = ['#ff4444' if 'A' in c else '#ffaa44' if 'B' in c else '#44ff44' for c in df_valor['clasificacion_valor']]
+    ax.bar(range(len(df_valor)), df_valor['valor_rotacion'], color=colors, alpha=0.7)
+    ax.set_xticks(range(len(df_valor)))
+    ax.set_xticklabels(df_valor['tipo_residuo'], rotation=45, ha='right')
+    ax.set_ylabel("Valor de rotación ($)")
+    ax.set_title("Gráfico de Pareto - Valor de Rotación")
+    st.pyplot(fig)
+
+def grafico_pareto_velocidad():
+    df_vel = calcular_velocidad_rotacion()
+    if df_vel.empty:
+        return None
+    fig, ax = plt.subplots(figsize=(10, 5))
+    colors = ['#ff4444' if 'Rápida' in c else '#ffaa44' if 'media' in c else '#44ff44' for c in df_vel['clasificacion_velocidad']]
+    ax.bar(range(len(df_vel)), df_vel['velocidad_rotacion'], color=colors, alpha=0.7)
+    ax.set_xticks(range(len(df_vel)))
+    ax.set_xticklabels(df_vel['tipo_residuo'], rotation=45, ha='right')
+    ax.set_ylabel("Velocidad de rotación (kg/día)")
+    ax.set_title("Gráfico de Pareto - Velocidad de Rotación")
+    st.pyplot(fig)
+
+# ============================================
 # INTERFAZ DE USUARIO (con resúmenes y análisis)
 # ============================================
 if 'bienvenido' not in st.session_state:
@@ -417,7 +446,6 @@ with tab2:
             alta = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("A")]["cantidad_items"].values
             media = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("B")]["cantidad_items"].values
             baja = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("C")]["cantidad_items"].values
-            total_items = len(df_valor)
             st.write(f"- **Categoría A**: {alta[0] if len(alta)>0 else 0} residuos generan el 80% del valor. Enfoque de control riguroso.")
             st.write(f"- **Categoría B**: {media[0] if len(media)>0 else 0} residuos generan el 15% del valor. Control periódico.")
             st.write(f"- **Categoría C**: {baja[0] if len(baja)>0 else 0} residuos generan el 5% del valor. Control simple.")
@@ -455,7 +483,7 @@ with tab3:
         else:
             st.warning("⚠️ Se necesitan ventas registradas para calcular velocidad.")
 
-# ---------- Pestaña 4: Análisis de Tiempo de Salida (restaurada) ----------
+# ---------- Pestaña 4: Análisis de Tiempo de Salida ----------
 with tab4:
     st.subheader("⏱️ Análisis de Tiempo de Salida del Almacén")
     st.markdown("**Mide cuántos días tarda cada residuo en venderse desde que ingresa.**")
@@ -466,7 +494,6 @@ with tab4:
             df_show["dias_promedio"] = df_show["dias_promedio"].apply(lambda x: f"{x:.1f} días")
             st.dataframe(df_show[["tipo_residuo", "dias_promedio", "cantidad_vendida", "clasificacion_tiempo"]], use_container_width=True)
             
-            # Resumen por tipo de tiempo
             st.markdown("### 📊 Distribución por tiempo de salida")
             resumen_tiempo = df_tiempo.groupby("clasificacion_tiempo").agg(
                 cantidad_items=("id", "count"),
@@ -475,7 +502,6 @@ with tab4:
             resumen_tiempo["dias_promedio"] = resumen_tiempo["dias_promedio"].apply(lambda x: f"{x:.1f} días")
             st.dataframe(resumen_tiempo, use_container_width=True)
             
-            # Interpretación
             st.markdown("#### 🔍 Interpretación")
             st.write("- **🚀 Muy rápido (≤ 7 días):** Excelente rotación. Asegurar stock continuo.")
             st.write("- **📦 Rápido (8-30 días):** Buena rotación. Revisar periódicamente.")
@@ -485,29 +511,37 @@ with tab4:
         else:
             st.warning("⚠️ No hay suficientes ventas registradas para analizar tiempos de salida.")
 
-# ---------- Pestaña 5: Gráficos ----------
+# ---------- Pestaña 5: Gráficos (AHORA CON DOS GRÁFICOS) ----------
 with tab5:
-    st.subheader("📊 Gráfico de Pareto (Valor)")
-    if st.button("📈 Generar gráfico de Pareto"):
-        df_valor = clasificar_abc_valor()
-        if not df_valor.empty:
-            fig, ax = plt.subplots(figsize=(10, 5))
-            colors = ['#ff4444' if 'A' in c else '#ffaa44' if 'B' in c else '#44ff44' for c in df_valor['clasificacion_valor']]
-            ax.bar(range(len(df_valor)), df_valor['valor_rotacion'], color=colors)
-            ax.set_xticks(range(len(df_valor)))
-            ax.set_xticklabels(df_valor['tipo_residuo'], rotation=45)
-            ax.set_title("Gráfico de Pareto - Valor de Rotación")
-            st.pyplot(fig)
-            st.toast("📊 Gráfico de Pareto generado correctamente", icon="📈")
-        else:
-            st.warning("⚠️ No hay datos para generar el gráfico.")
+    st.subheader("📊 Gráficos de Pareto")
+    
+    col_graf1, col_graf2 = st.columns(2)
+    
+    with col_graf1:
+        st.markdown("### 📈 Por VALOR")
+        if st.button("Generar gráfico de Pareto (Valor)", key="btn_pareto_valor"):
+            df_valor = clasificar_abc_valor()
+            if not df_valor.empty:
+                grafico_pareto_valor()
+                st.caption("🔴 A: Alto valor | 🟡 B: Medio valor | 🟢 C: Bajo valor")
+            else:
+                st.warning("No hay datos suficientes para generar el gráfico de valor.")
+    
+    with col_graf2:
+        st.markdown("### ⚡ Por VELOCIDAD")
+        if st.button("Generar gráfico de Pareto (Velocidad)", key="btn_pareto_vel"):
+            df_vel = calcular_velocidad_rotacion()
+            if not df_vel.empty:
+                grafico_pareto_velocidad()
+                st.caption("🔴 A: Rápida rotación | 🟡 B: Rotación media | 🟢 C: Lenta rotación")
+            else:
+                st.warning("No hay suficientes ventas para generar el gráfico de velocidad.")
 
 # ---------- Pestaña 6: Historial ----------
 with tab6:
     st.subheader("📜 Historial Completo")
     historial = cargar_historial()
     if not historial.empty:
-        # Mostrar solo las columnas relevantes
         cols_mostrar = ["fecha", "tipo_movimiento", "tipo_residuo", "cantidad", "precio_unitario", "valor_total", "proveedor_cliente", "dias_rotacion"]
         df_hist_show = historial[cols_mostrar].copy()
         df_hist_show["precio_unitario"] = df_hist_show["precio_unitario"].apply(lambda x: f"${x:.2f}")
