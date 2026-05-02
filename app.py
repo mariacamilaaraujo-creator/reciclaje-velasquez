@@ -12,9 +12,51 @@ st.markdown("### Sistema de Gestión de Inventario con Clasificación ABC DUAL")
 st.info("📦 **Modo de acumulación activado:** Los residuos del mismo tipo se suman automáticamente")
 
 # ============================================
-# CONEXIÓN A GOOGLE SHEETS
+# BARRA LATERAL CON INFORMACIÓN DEL MÉTODO ABC
 # ============================================
+with st.sidebar:
+    st.image("https://img.icons8.com/color/96/000000/recycle-sign.png", width=80)
+    st.markdown("## 📊 Método ABC **DUAL**")
+    st.markdown("---")
+    
+    # Explicación del método ABC por VALOR
+    st.markdown("### 1️⃣ Clasificación por **VALOR**")
+    st.markdown("**Fórmula:** `Valor de rotación = Cantidad disponible × Precio de venta`")
+    st.markdown("**Interpretación:** Mide la importancia económica de cada residuo.")
+    st.markdown("""
+    - **Categoría A (80%)** → Generan la mayor parte del valor. Prioridad alta.
+    - **Categoría B (15%)** → Valor medio. Control periódico.
+    - **Categoría C (5%)** → Bajo valor. Control simple.
+    """)
+    st.markdown("---")
+    
+    # Explicación del método ABC por VELOCIDAD
+    st.markdown("### 2️⃣ Clasificación por **VELOCIDAD**")
+    st.markdown("**Fórmula:** `Velocidad de rotación = Cantidad vendida / Días en inventario`")
+    st.markdown("**Interpretación:** Qué tan rápido se vende un residuo desde que entra al almacén.")
+    st.markdown("""
+    - **Categoría A (80%)** → Rápida rotación (sale rápido). Mantener stock continuo.
+    - **Categoría B (15%)** → Rotación media.
+    - **Categoría C (5%)** → Lenta rotación (demora en salir). Minimizar stock.
+    """)
+    st.markdown("---")
+    
+    # Explicación del análisis de tiempo de salida
+    st.markdown("### ⏱️ Tiempo de Salida")
+    st.markdown("**Clasificación por días promedio para venderse:**")
+    st.markdown("""
+    - 🚀 **Muy rápido** (≤ 7 días)
+    - 📦 **Rápido** (8-30 días)
+    - ⏳ **Normal** (31-90 días)
+    - 🐢 **Lento** (> 90 días)
+    """)
+    st.markdown("---")
+    st.caption("💾 Datos guardados permanentemente en Google Sheets")
+    st.caption("♻️ Reciclaje Velásquez")
 
+# ============================================
+# CONEXIÓN A GOOGLE SHEETS (sin cambios)
+# ============================================
 def conectar_google_sheets():
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
@@ -85,9 +127,8 @@ def guardar_historial(df):
         return False
 
 # ============================================
-# FUNCIONES CON MENSAJES MEJORADOS
+# FUNCIONES PRINCIPALES (acumulación por tipo)
 # ============================================
-
 def agregar_residuo(tipo, cantidad, precio_compra, precio_venta, proveedor):
     if not tipo or cantidad <= 0:
         st.toast("⚠️ Complete todos los campos correctamente", icon="⚠️")
@@ -95,7 +136,6 @@ def agregar_residuo(tipo, cantidad, precio_compra, precio_venta, proveedor):
     
     df = cargar_inventario()
     
-    # Verificar si ya existe un residuo del mismo tipo
     if not df.empty and tipo in df["tipo_residuo"].values:
         idx = df[df["tipo_residuo"] == tipo].index[0]
         cantidad_anterior = df.loc[idx, "cantidad"]
@@ -108,7 +148,6 @@ def agregar_residuo(tipo, cantidad, precio_compra, precio_venta, proveedor):
         
         guardar_inventario(df)
         
-        # Registrar en historial
         df_hist = cargar_historial()
         nuevo_hist = pd.DataFrame([{
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -141,7 +180,6 @@ def agregar_residuo(tipo, cantidad, precio_compra, precio_venta, proveedor):
         df = pd.concat([df, nueva_fila], ignore_index=True)
         guardar_inventario(df)
         
-        # Registrar en historial
         df_hist = cargar_historial()
         nuevo_hist = pd.DataFrame([{
             "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -195,7 +233,6 @@ def vender_residuo_por_tipo(tipo, cantidad_vendida):
     
     guardar_inventario(df.reset_index(drop=True))
     
-    # Registrar en historial
     df_hist = cargar_historial()
     nuevo_hist = pd.DataFrame([{
         "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -214,9 +251,8 @@ def vender_residuo_por_tipo(tipo, cantidad_vendida):
     return mensaje
 
 # ============================================
-# CLASIFICACIONES (sin cambios)
+# CLASIFICACIONES Y ANÁLISIS
 # ============================================
-
 def clasificar_abc_valor():
     df = cargar_inventario()
     if df.empty:
@@ -267,28 +303,51 @@ def calcular_velocidad_rotacion():
     velocidad_ordenado["clasificacion_velocidad"] = velocidad_ordenado["porcentaje_acumulado"].apply(asignar_abc_vel)
     return velocidad_ordenado
 
-# ============================================
-# INTERFAZ (con mensaje de bienvenida)
-# ============================================
+def analisis_tiempo_salida():
+    """Análisis de cuánto tarda cada residuo en venderse (días desde ingreso hasta venta)"""
+    df_hist = cargar_historial()
+    if df_hist.empty:
+        return pd.DataFrame()
+    ventas = df_hist[df_hist["tipo_movimiento"] == "VENTA"].copy()
+    if ventas.empty:
+        return pd.DataFrame()
+    if "dias_rotacion" not in ventas.columns:
+        ventas["dias_rotacion"] = 1
+    tiempo = ventas.groupby(["id_residuo", "tipo_residuo"]).agg({
+        "dias_rotacion": "mean",
+        "cantidad": "sum"
+    }).reset_index()
+    tiempo.columns = ["id", "tipo_residuo", "dias_promedio", "cantidad_vendida"]
+    tiempo = tiempo.sort_values("dias_promedio", ascending=False)
+    def clasificar_tiempo(dias):
+        if dias <= 7:
+            return "🚀 Muy rápido (≤ 7 días)"
+        elif dias <= 30:
+            return "📦 Rápido (8-30 días)"
+        elif dias <= 90:
+            return "⏳ Normal (31-90 días)"
+        else:
+            return "🐢 Lento (> 90 días)"
+    tiempo["clasificacion_tiempo"] = tiempo["dias_promedio"].apply(clasificar_tiempo)
+    return tiempo
 
-with st.sidebar:
-    st.image("https://img.icons8.com/color/96/000000/recycle-sign.png", width=80)
-    st.markdown("## 📊 Método ABC DUAL")
-    st.markdown("---")
-    st.markdown("### 1️⃣ Por VALOR")
-    st.markdown("💰 Cantidad × Precio venta")
-    st.markdown("### 2️⃣ Por VELOCIDAD")
-    st.markdown("⚡ Qué tan rápido se vende")
-    st.markdown("---")
-    st.success("📦 **Modo acumulación:** Los residuos del mismo tipo se suman automáticamente")
-
-# Mostrar un mensaje de bienvenida al iniciar (solo una vez)
+# ============================================
+# INTERFAZ DE USUARIO (con resúmenes y análisis)
+# ============================================
 if 'bienvenido' not in st.session_state:
     st.toast("♻️ ¡Bienvenido al Sistema de Reciclaje Velásquez! Sistema listo para operar.", icon="🎉")
     st.session_state.bienvenido = True
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 Gestión", "💰 Clasificación Valor", "⚡ Clasificación Velocidad", "📊 Gráficos", "📜 Historial"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📦 Gestión", 
+    "💰 Clasificación Valor", 
+    "⚡ Clasificación Velocidad",
+    "⏱️ Tiempo de Salida",
+    "📊 Gráficos", 
+    "📜 Historial"
+])
 
+# ---------- Pestaña 1: Gestión ----------
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
@@ -332,8 +391,9 @@ with tab1:
     else:
         st.info("📭 No hay residuos registrados. Agrega tu primer residuo usando el formulario.")
 
+# ---------- Pestaña 2: Clasificación por Valor (con resumen) ----------
 with tab2:
-    st.subheader("💰 Clasificación por VALOR")
+    st.subheader("💰 Clasificación ABC por VALOR de Rotación")
     if st.button("🔄 Actualizar clasificación por VALOR"):
         df_valor = clasificar_abc_valor()
         if not df_valor.empty:
@@ -341,24 +401,93 @@ with tab2:
             df_show["precio_venta"] = df_show["precio_venta"].apply(lambda x: f"${x:.2f}")
             df_show["valor_rotacion"] = df_show["valor_rotacion"].apply(lambda x: f"${x:.2f}")
             st.dataframe(df_show[["tipo_residuo", "cantidad", "precio_venta", "valor_rotacion", "clasificacion_valor"]], use_container_width=True)
+            
+            # Resumen detallado y análisis
+            st.markdown("### 📊 Resumen del análisis")
+            resumen_valor = df_valor.groupby("clasificacion_valor").agg(
+                cantidad_items=("id", "count"),
+                valor_total=("valor_rotacion", "sum")
+            ).reset_index()
+            resumen_valor["porcentaje_del_total"] = (resumen_valor["valor_total"] / resumen_valor["valor_total"].sum() * 100).round(1)
+            resumen_valor["valor_total"] = resumen_valor["valor_total"].apply(lambda x: f"${x:,.2f}")
+            st.dataframe(resumen_valor, use_container_width=True)
+            
+            # Interpretación automática
+            st.markdown("#### 🔍 Interpretación")
+            alta = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("A")]["cantidad_items"].values
+            media = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("B")]["cantidad_items"].values
+            baja = resumen_valor[resumen_valor["clasificacion_valor"].str.contains("C")]["cantidad_items"].values
+            total_items = len(df_valor)
+            st.write(f"- **Categoría A**: {alta[0] if len(alta)>0 else 0} residuos generan el 80% del valor. Enfoque de control riguroso.")
+            st.write(f"- **Categoría B**: {media[0] if len(media)>0 else 0} residuos generan el 15% del valor. Control periódico.")
+            st.write(f"- **Categoría C**: {baja[0] if len(baja)>0 else 0} residuos generan el 5% del valor. Control simple.")
             st.toast("✅ Clasificación por valor actualizada correctamente", icon="📊")
         else:
             st.warning("⚠️ No hay datos suficientes para clasificar por valor.")
 
+# ---------- Pestaña 3: Clasificación por Velocidad (con resumen) ----------
 with tab3:
-    st.subheader("⚡ Clasificación por VELOCIDAD")
+    st.subheader("⚡ Clasificación ABC por VELOCIDAD de Rotación")
     if st.button("🔄 Actualizar clasificación por VELOCIDAD"):
         df_vel = calcular_velocidad_rotacion()
         if not df_vel.empty:
             df_show = df_vel.copy()
             df_show["velocidad_rotacion"] = df_show["velocidad_rotacion"].apply(lambda x: f"{x:.2f} kg/día")
             st.dataframe(df_show[["tipo_residuo", "cantidad_total_vendida", "dias_promedio_rotacion", "velocidad_rotacion", "clasificacion_velocidad"]], use_container_width=True)
+            
+            # Resumen detallado
+            st.markdown("### 📊 Resumen del análisis de velocidad")
+            resumen_vel = df_vel.groupby("clasificacion_velocidad").agg(
+                cantidad_items=("id", "count"),
+                velocidad_promedio=("velocidad_rotacion", "mean"),
+                dias_promedio=("dias_promedio_rotacion", "mean")
+            ).reset_index()
+            resumen_vel["velocidad_promedio"] = resumen_vel["velocidad_promedio"].apply(lambda x: f"{x:.2f} kg/día")
+            resumen_vel["dias_promedio"] = resumen_vel["dias_promedio"].apply(lambda x: f"{x:.1f} días")
+            st.dataframe(resumen_vel, use_container_width=True)
+            
+            # Interpretación
+            st.markdown("#### 🔍 Interpretación")
+            st.write("- **Categoría A (Rápida rotación):** Productos que se venden rápido. Mantener stock suficiente y reorden frecuente.")
+            st.write("- **Categoría B (Rotación media):** Balance entre rotación y stock.")
+            st.write("- **Categoría C (Lenta rotación):** Minimizar inventario, evaluar si es rentable mantenerlos.")
             st.toast("✅ Clasificación por velocidad actualizada correctamente", icon="⚡")
         else:
             st.warning("⚠️ Se necesitan ventas registradas para calcular velocidad.")
 
+# ---------- Pestaña 4: Análisis de Tiempo de Salida (restaurada) ----------
 with tab4:
-    st.subheader("📊 Gráfico de Pareto")
+    st.subheader("⏱️ Análisis de Tiempo de Salida del Almacén")
+    st.markdown("**Mide cuántos días tarda cada residuo en venderse desde que ingresa.**")
+    if st.button("🔄 Analizar tiempos de salida"):
+        df_tiempo = analisis_tiempo_salida()
+        if not df_tiempo.empty:
+            df_show = df_tiempo.copy()
+            df_show["dias_promedio"] = df_show["dias_promedio"].apply(lambda x: f"{x:.1f} días")
+            st.dataframe(df_show[["tipo_residuo", "dias_promedio", "cantidad_vendida", "clasificacion_tiempo"]], use_container_width=True)
+            
+            # Resumen por tipo de tiempo
+            st.markdown("### 📊 Distribución por tiempo de salida")
+            resumen_tiempo = df_tiempo.groupby("clasificacion_tiempo").agg(
+                cantidad_items=("id", "count"),
+                dias_promedio=("dias_promedio", "mean")
+            ).reset_index()
+            resumen_tiempo["dias_promedio"] = resumen_tiempo["dias_promedio"].apply(lambda x: f"{x:.1f} días")
+            st.dataframe(resumen_tiempo, use_container_width=True)
+            
+            # Interpretación
+            st.markdown("#### 🔍 Interpretación")
+            st.write("- **🚀 Muy rápido (≤ 7 días):** Excelente rotación. Asegurar stock continuo.")
+            st.write("- **📦 Rápido (8-30 días):** Buena rotación. Revisar periódicamente.")
+            st.write("- **⏳ Normal (31-90 días):** Rotación aceptable. Puede optimizarse.")
+            st.write("- **🐢 Lento (> 90 días):** Problema de demanda o precio. Considerar reducir stock o campañas de venta.")
+            st.toast("✅ Análisis de tiempos de salida completado", icon="⏱️")
+        else:
+            st.warning("⚠️ No hay suficientes ventas registradas para analizar tiempos de salida.")
+
+# ---------- Pestaña 5: Gráficos ----------
+with tab5:
+    st.subheader("📊 Gráfico de Pareto (Valor)")
     if st.button("📈 Generar gráfico de Pareto"):
         df_valor = clasificar_abc_valor()
         if not df_valor.empty:
@@ -373,14 +502,20 @@ with tab4:
         else:
             st.warning("⚠️ No hay datos para generar el gráfico.")
 
-with tab5:
+# ---------- Pestaña 6: Historial ----------
+with tab6:
     st.subheader("📜 Historial Completo")
     historial = cargar_historial()
     if not historial.empty:
-        st.dataframe(historial.sort_values("fecha", ascending=False), use_container_width=True)
+        # Mostrar solo las columnas relevantes
+        cols_mostrar = ["fecha", "tipo_movimiento", "tipo_residuo", "cantidad", "precio_unitario", "valor_total", "proveedor_cliente", "dias_rotacion"]
+        df_hist_show = historial[cols_mostrar].copy()
+        df_hist_show["precio_unitario"] = df_hist_show["precio_unitario"].apply(lambda x: f"${x:.2f}")
+        df_hist_show["valor_total"] = df_hist_show["valor_total"].apply(lambda x: f"${x:.2f}")
+        st.dataframe(df_hist_show.sort_values("fecha", ascending=False), use_container_width=True)
         st.caption(f"📌 Total de movimientos registrados: {len(historial)}")
     else:
         st.info("📭 No hay movimientos registrados aún.")
 
 st.divider()
-st.caption("♻️ **Reciclaje Velásquez** | Mensajes en tiempo real | Modo acumulación por tipo de residuo")
+st.caption("♻️ **Reciclaje Velásquez** | Mensajes en tiempo real | Modo acumulación por tipo de residuo | Análisis de tiempo de salida incluido")
