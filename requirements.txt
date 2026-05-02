@@ -1,6 +1,7 @@
 streamlit
 pandas
 matplotlib
-openpyxl
 gspread
 oauth2client
+openpyxl
+fpdf
