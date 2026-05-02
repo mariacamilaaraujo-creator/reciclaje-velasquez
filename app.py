@@ -11,7 +11,7 @@ import time
 
 st.set_page_config(page_title="Reciclaje Velásquez", page_icon="♻️", layout="wide")
 
-st.title("♻️ RECICLAJE")
+st.title("♻️ RECICLAJE VELÁSQUEZ")
 st.markdown("### Sistema de Gestión de Inventario con Clasificación ABC DUAL")
 st.info("📦 **Modo de acumulación activado:** Los residuos del mismo tipo se suman automáticamente")
 
