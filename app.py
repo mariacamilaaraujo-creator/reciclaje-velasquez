@@ -229,7 +229,7 @@ def vender_residuo_por_tipo(tipo, cantidad_vendida):
     else:
         df.loc[idx, "cantidad"] = nueva_cantidad
         mensaje = f"✅ Venta exitosa: {cantidad_vendida} kg de '{tipo}' por ${valor_venta:,.2f}. Stock restante: {nueva_cantidad} kg. Días en almacén: {dias_rotacion}"
-        st.toast(mensaje, icon="💸")
+        st.toast(mensaje, icon="💲")
     
     guardar_inventario(df.reset_index(drop=True))
     
