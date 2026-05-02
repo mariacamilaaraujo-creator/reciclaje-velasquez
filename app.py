@@ -550,7 +550,36 @@ def low_stock_alerts():
         st.success("✅ Todos los residuos están por encima del umbral de stock.")
 
 # ============================================
-# DASHBOARD EJECUTIVO (sin cambios relevantes)
+# FUNCIÓN DE REINICIO DEL SISTEMA (RESET) - NUEVA
+# ============================================
+def resetear_sistema():
+    """Elimina todos los datos de inventario e historial, dejando el sistema como nuevo."""
+    try:
+        sheet = conectar_google_sheets()
+        if sheet:
+            # Vaciar hoja de inventario (conservar solo encabezados)
+            ws_inv = sheet.worksheet("inventario")
+            ws_inv.clear()
+            encabezados_inv = ["id", "tipo_residuo", "cantidad", "precio_compra", "precio_venta", "proveedor", "fecha_ingreso"]
+            ws_inv.append_row(encabezados_inv)
+            
+            # Vaciar hoja de historial
+            ws_hist = sheet.worksheet("historial")
+            ws_hist.clear()
+            encabezados_hist = ["fecha", "tipo_movimiento", "id_residuo", "tipo_residuo", "cantidad", "precio_unitario", "valor_total", "proveedor_cliente", "dias_rotacion"]
+            ws_hist.append_row(encabezados_hist)
+            
+            # Limpiar caché de Streamlit
+            limpiar_cache()
+            return True
+        else:
+            return False
+    except Exception as e:
+        st.error(f"❌ Error al reiniciar el sistema: {e}")
+        return False
+
+# ============================================
+# DASHBOARD EJECUTIVO (con nuevo botón de reinicio)
 # ============================================
 def dashboard_ejecutivo():
     st.subheader("📊 Dashboard Ejecutivo")
@@ -591,6 +620,26 @@ def dashboard_ejecutivo():
             href = f'<a href="data:application/octet-stream;base64,{b64}" download="reporte_reciclaje.pdf">Descargar PDF</a>'
             st.markdown(href, unsafe_allow_html=True)
             st.toast("✅ Reporte PDF generado", icon="📄")
+    
+    # ----- AÑADIDO: BOTÓN DE REINICIO DEL SISTEMA -----
+    st.markdown("---")
+    st.subheader("⚠️ Administración del Sistema")
+    with st.expander("Reiniciar todo el sistema (eliminar todos los datos)"):
+        st.warning("¡CUIDADO! Esta acción eliminará permanentemente **todo el inventario y el historial**. No se puede deshacer.")
+        confirmar = st.checkbox("Confirmo que quiero eliminar TODOS los datos", key="confirm_reset")
+        if confirmar:
+            if st.button("🗑️ Reiniciar sistema completamente", key="btn_reset"):
+                with st.spinner("Reiniciando sistema..."):
+                    exito = resetear_sistema()
+                    if exito:
+                        st.success("✅ Sistema reiniciado correctamente. Todos los datos han sido eliminados.")
+                        st.toast("Sistema reiniciado. Recarga la página para ver los cambios.", icon="🔄")
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error("❌ Error al reiniciar. Revisa la conexión con Google Sheets.")
+        else:
+            st.info("Marca la casilla de confirmación para habilitar el reinicio.")
 
 # ============================================
 # INTERFAZ DE USUARIO (con NUEVA PESTAÑA para valor histórico)
@@ -808,4 +857,4 @@ with tab7:
         st.info("📭 No hay movimientos registrados aún.")
 
 st.divider()
-st.caption("♻️ **Reciclaje Velásquez** | ABC Dual mejorado con Valor Histórico | Datos persistentes + caché para evitar cuotas")
+st.caption("♻️ **Reciclaje Velásquez** | ABC Dual mejorado con Valor Histórico | Datos persistentes + caché para evitar cuotas | Incluye reinicio seguro del sistema")
