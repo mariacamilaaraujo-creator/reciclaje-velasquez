@@ -38,7 +38,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Explicación del nuevo método ABC por VALOR HISTÓRICO
-    st.markdown("### 1️⃣b Clasificación por **VALOR HISTÓRICO (Ventas)**")
+    st.markdown("### 1️⃣ Clasificación por **VALOR HISTÓRICO (Ventas)**")
     st.markdown("**Fórmula:** `Valor histórico = Suma de todas las ventas (cantidad × precio venta)`")
     st.markdown("**Interpretación:** Mide qué productos han generado más ingresos totales.")
     st.markdown("---")
