@@ -53,7 +53,7 @@ with st.sidebar:
     st.markdown("**Clasificación por días promedio para venderse:** (≤7 días: rápido, >90: lento)")
     st.markdown("---")
     st.caption("💾 Datos guardados permanentemente en Google Sheets")
-    st.caption("♻️ Reciclaje Velásquez")
+    st.caption("INVENTARIO")
 
 # ============================================
 # CONEXIÓN A GOOGLE SHEETS CON CACHÉ Y REINTENTOS
