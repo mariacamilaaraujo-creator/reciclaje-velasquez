@@ -9,11 +9,11 @@ import base64
 from fpdf import FPDF
 import time
 
-st.set_page_config(page_title="Reciclaje Velásquez", page_icon="♻️", layout="wide")
+st.set_page_config(page_title="INVENTARIO", page_icon="♻️", layout="wide")
 
-st.title("♻️ RECICLAJE VELÁSQUEZ")
+st.title("INVENTARIO")
 st.markdown("### Sistema de Gestión de Inventario con Clasificación ABC DUAL")
-st.info("📦 **Modo de acumulación activado:** Los residuos del mismo tipo se suman automáticamente")
+st.info("📦 **Modo de acumulación activado:** Los productos del mismo tipo se suman automáticamente")
 
 # ============================================
 # INICIALIZACIÓN DE VARIABLES DE SESIÓN
